@@ -63,6 +63,8 @@ h2{font-size:17px;margin:18px 0 8px;text-wrap:balance}
 .tile.cur{border-color:var(--ink);box-shadow:inset 0 0 0 1.5px var(--ink)}
 .tile .mark{position:absolute;inset:4px;border:2.5px solid var(--redpen);border-radius:50%;transform:rotate(-8deg);pointer-events:none;opacity:.85}
 .tile .sc{position:absolute;right:3px;bottom:1px;font:700 11px var(--ko);color:var(--redpen)}
+.voicebox{background:var(--sheet);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow);display:grid;gap:8px}
+.voicebox .btn{justify-self:start}
 .plan{background:var(--sheet);border-radius:14px;padding:4px 16px;box-shadow:var(--shadow)}
 .plan div{display:grid;grid-template-columns:70px 1fr;gap:10px;padding-block:10px;border-bottom:1px solid var(--line);font-size:14px}
 .plan div:last-child{border:0}
@@ -150,6 +152,13 @@ select{width:100%;padding:11px;border-radius:10px;border:1.5px solid var(--line)
     <h2>학습 달력</h2>
     <p class="muted">빨간 동그라미 = 퀴즈 80점 이상 통과한 날. 점선 칸은 주간평가예요.</p>
     <div id="weeks"></div>
+    <h2>🔊 발음 목소리</h2>
+    <div class="voicebox">
+      <label for="voiceSel" class="muted">폰에 있는 영어 목소리 중에서 골라요</label>
+      <select id="voiceSel"></select>
+      <button class="btn ghost" type="button" id="voiceTest">▶ 들어보기</button>
+      <p class="muted" id="voiceHelp">목록에 목소리가 하나뿐이면, 폰 <b>설정 → 일반 → 글자 읽어주기(TTS) → Google 음성 서비스 ⚙ → 음성 설치/영어(미국)</b>에서 남자 목소리를 고르면 앱도 그 목소리를 써요.</p>
+    </div>
     <h2>12주 공부 계획</h2>
     <div class="plan">
       <div><b class="now">1~4주</b><span><b>중학 영어 + 현장 표현</b> · 성격, 일정, 돈, 조리, 맛, 손님 응대, 길 찾기, 출장, 위생, 전화, 직장, 문제 해결 (단어 720개 · 문장 240개, 중2~중3 문법)</span></div>
@@ -263,12 +272,40 @@ function setSync(t) { $('#sync').textContent = t; }
 })();
 
 /* ---------- speech ---------- */
-let voice = null;
+let voice = null, VOICES = [];
+const VKEY = 'letsga-voice';
+const MALE = /x-(iom|iol|tpd)|\bmale\b|Aaron|Evan|Nathan|Tom\b|Alex\b|Daniel|Guy|Andrew|Brian|Christopher|Eric|Roger|Steffan|Davis|Tony|Jason|Ryan|Reed|Eddy|Rocko/i;
+const FEMALE = /x-(sfg|iob|iog|tpc|tpf)|female|Samantha|Karen|Kathy|Victoria|Aria|Jenny|Ava|Allison|Susan|Zoe|Flo|Sandy|Shelley|Moira|Tessa/i;
+function vLabel(v) {
+  const g = MALE.test(v.name) ? '👨 남자' : FEMALE.test(v.name) ? '👩 여자' : '';
+  const nice = v.name.replace(/^en-us-x-(\w{3})-(local|network)$/i, (m, c, n) => `구글 목소리 ${c.toUpperCase()}${n === 'network' ? ' (고음질·인터넷)' : ''}`);
+  return `${g ? g + ' · ' : ''}${nice} (${v.lang})`;
+}
 function pickVoice() {
-  const vs = speechSynthesis.getVoices().filter(v => /^en[-_]US/i.test(v.lang));
-  voice = vs.find(v => /Samantha|Google US|Aria|Jenny/i.test(v.name)) || vs[0] || null;
+  const all = speechSynthesis.getVoices();
+  const JOKE = /Albert|Bad News|Bahh|Bells|Boing|Bubbles|Cellos|Wobble|Good News|Jester|Organ|Superstar|Trinoids|Whisper|Zarvox|Grandma|Grandpa|Fred|Junior|Ralph/i;
+  const rank = v => (MALE.test(v.name) ? 0 : FEMALE.test(v.name) ? 2 : 1) + (/^en[-_]US/i.test(v.lang) ? 0 : 3);
+  VOICES = all.filter(v => /^en[-_](US|GB|AU|CA)/i.test(v.lang) && !JOKE.test(v.name)).sort((x, y) => rank(x) - rank(y));
+  let saved = null; try { saved = localStorage.getItem(VKEY); } catch(e) {}
+  const us = VOICES.filter(v => /^en[-_]US/i.test(v.lang));
+  voice = VOICES.find(v => v.voiceURI === saved)
+       || us.find(v => MALE.test(v.name) && /network/i.test(v.name))
+       || us.find(v => MALE.test(v.name) && !/Fred|Albert|Ralph|Junior/i.test(v.name))
+       || us.find(v => v.default) || us[0] || VOICES[0] || null;
+  const sel = document.getElementById('voiceSel');
+  if (sel) {
+    sel.innerHTML = VOICES.length ? VOICES.map(v => `<option value="${esc(v.voiceURI)}">${esc(vLabel(v))}</option>`).join('')
+                                  : '<option>이 폰에서 목소리 목록을 불러오지 못했어요</option>';
+    if (voice) sel.value = voice.voiceURI;
+  }
 }
 try { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; } catch(e) {}
+document.getElementById('voiceSel').onchange = e => {
+  voice = VOICES.find(v => v.voiceURI === e.target.value) || voice;
+  try { localStorage.setItem(VKEY, e.target.value); } catch(err) {}
+  say("Hi! Let's check the inventory before opening.");
+};
+document.getElementById('voiceTest').onclick = () => { pickVoice.done || (pickVoice(), pickVoice.done = true); say("Hi! Let's check the inventory before opening."); };
 function say(text, slow) {
   try {
     speechSynthesis.cancel();
@@ -565,6 +602,6 @@ render();
 </script>
 
 <script>
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=103e02c724').catch(() => {});
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js?v=c61dc8ad48').catch(() => {});
 </script>
 </body></html>
